@@ -1,23 +1,34 @@
 use macroquad::prelude::*;
 use std::f32::consts::PI;
 
-const GRAVITY: f32 = 2.2;
+const GRAVITY: f32 = 0.3;
 const ROTATION: f32 = PI / 200.;
 
 #[macroquad::main("BallBounce")]
 async fn main() {
+    let x_center = screen_width() / 2.;
+    let y_center = screen_height() / 2.;
+
     let mut balls = vec![
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
+        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
         Ball::new(
-            Circle::new(screen_width() / 2. - 100., screen_height() / 2. + 2., 10.),
+            Circle::new(x_center - 50., y_center - 40., 10.),
             Vec2::new(1., 1.),
         ),
         Ball::new(
-            Circle::new(screen_width() / 2. - 80., screen_height() / 2. + 4., 10.),
-            Vec2::new(2., 2.),
+            Circle::new(x_center + 50., y_center + 40., 10.),
+            Vec2::new(-12., -5.),
         ),
         Ball::new(
-            Circle::new(screen_width() / 2. - 60., screen_height() / 2. + 6., 10.),
-            Vec2::new(-12., -5.),
+            Circle::new(x_center + 120., y_center + 40., 10.),
+            Vec2::new(0., 0.),
         ),
     ];
 
@@ -25,10 +36,23 @@ async fn main() {
         RegularHexagon::new(Vec2::new(screen_width() / 2., screen_height() / 2.), 100.);
 
     loop {
-        update_ball_velocity(&mut balls, &hexagon);
-        update_pos(&mut balls, &mut hexagon);
-        // fix overlaps
+        ball_movement(&mut balls);
+        hex_movement(&mut hexagon);
+
+        ball_collisions(&mut balls);
+        hex_collisions(&mut balls, &hexagon);
+
+        apply_gravity(&mut balls);
+
         draw(&balls, &hexagon).await;
+
+        // println!("{} {}", balls[3].cir.point(), balls[3].vel);
+
+        // fix overlaps
+        // for each each ball
+        //      for each other ball
+        //          if they overlap
+        //          move them away from each other's center the required distance by the ratio of their velocity
     }
 }
 
@@ -77,13 +101,52 @@ impl RegularHexagon {
             self.vertices[i] = angle.rotate(self.vertices[i] - self.center) + self.center;
         }
     }
+
+    fn lines(&self) -> [(Vec2, Vec2); 6] {
+        let mut lines: [(Vec2, Vec2); 6] = Default::default();
+
+        for i in 0..self.vertices.len() {
+            let v1 = self.vertices[i];
+            let v2 = if i == 5 {
+                self.vertices[0]
+            } else {
+                self.vertices[i + 1]
+            };
+            lines[i] = (v1, v2);
+        }
+
+        lines
+    }
 }
 
-fn update_ball_velocity(balls: &mut [Ball], hexagon: &RegularHexagon) {
+fn ball_movement(balls: &mut [Ball]) {
+    for ball in balls {
+        ball.cir = ball.cir.offset(ball.vel);
+    }
+}
+
+fn hex_movement(hex: &mut RegularHexagon) {
+    hex.rotate(ROTATION);
+}
+
+fn ball_collisions(balls: &mut [Ball]) {
     for i in 0..balls.len() {
-        // Ball collision
         for j in (i + 1)..balls.len() {
             if balls[i].cir.overlaps(&balls[j].cir) {
+                let vec_between_circles = balls[j].cir.point() - balls[i].cir.point();
+                let overlap_ratio =
+                    1. - vec_between_circles.length() / (balls[i].cir.r + balls[j].cir.r);
+                let offset = if overlap_ratio == 1.0 {
+                    Vec2::ONE
+                } else {
+                    vec_between_circles * overlap_ratio
+                };
+
+                // Shift them away from each other
+                balls[i].cir = balls[i].cir.offset(offset * -0.5);
+                balls[j].cir = balls[j].cir.offset(offset * 0.5);
+
+                // Update velocities
                 let jmod = (balls[j].cir.point() - balls[i].cir.point()).normalize()
                     * 0.5
                     * balls[i].vel.length();
@@ -92,39 +155,33 @@ fn update_ball_velocity(balls: &mut [Ball], hexagon: &RegularHexagon) {
                     * 0.5
                     * balls[j].vel.length();
 
-                let old_i = balls[i].vel;
-                let old_j = balls[j].vel;
-
                 balls[i].vel = (balls[i].vel - jmod) * 0.5 + imod;
                 balls[j].vel = (balls[j].vel - imod) * 0.5 + jmod;
             }
         }
+    }
+}
 
-        // gravity
-        balls[i].vel.y += GRAVITY;
+fn hex_collisions(balls: &mut [Ball], hex: &RegularHexagon) {
+    for ball in balls {
+        let dist_from_center = (ball.cir.point() - hex.center).length();
+        if hex.radius <= dist_from_center {
+            // Shift it towards center of hex
+            ball.cir
+                .move_to(hex.center.move_towards(ball.cir.point(), hex.radius));
 
-        // Hex
-        // for j in 0..6 {
-        //     let new_direction = hexagon.center - balls[i].cir.point().normalize();
-        //     let new_vel = balls[i].vel.abs() * 0.8 * new_direction;
-        //
-        // }
-        //
-        // test with it as a circle
-        if hexagon.radius < (balls[i].cir.point() - hexagon.center).length() {
-            let new_direction = (hexagon.center - balls[i].cir.point()).normalize();
-            let new_vel = balls[i].vel.abs() * 0.9 * new_direction;
-            balls[i].vel = new_vel;
+            // Refract its velocity
+            ball.vel *= -1.;
+
+            // Apply friction?
         }
     }
 }
 
-fn update_pos(balls: &mut [Ball], hexagon: &mut RegularHexagon) {
+fn apply_gravity(balls: &mut [Ball]) {
     for ball in balls {
-        ball.cir = ball.cir.offset(ball.vel);
+        ball.vel.y += GRAVITY;
     }
-
-    hexagon.rotate(ROTATION);
 }
 
 async fn draw(balls: &[Ball], hexagon: &RegularHexagon) {
@@ -134,15 +191,8 @@ async fn draw(balls: &[Ball], hexagon: &RegularHexagon) {
         draw_circle(ball.cir.x, ball.cir.y, ball.cir.r, BLUE);
     }
 
-    for i in 0..6 {
-        let v1 = hexagon.vertices[i];
-        let v2 = if i == 5 {
-            hexagon.vertices[0]
-        } else {
-            hexagon.vertices[i + 1]
-        };
-        draw_line(v1.x, v1.y, v2.x, v2.y, 5., RED);
+    for line in hexagon.lines() {
+        draw_line(line.0.x, line.0.y, line.1.x, line.1.y, 5., RED);
     }
-
     next_frame().await;
 }
