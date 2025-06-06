@@ -1,39 +1,27 @@
 use macroquad::prelude::*;
 use std::f32::consts::PI;
 
-const GRAVITY: f32 = 0.3;
+const GRAVITY: f32 = 1.1;
 const ROTATION: f32 = PI / 200.;
 
 #[macroquad::main("BallBounce")]
 async fn main() {
     let x_center = screen_width() / 2.;
     let y_center = screen_height() / 2.;
+    let hex_radius = 100.;
 
-    let mut balls = vec![
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(Circle::new(x_center, y_center, 10.), Vec2::new(-2., -2.)),
-        Ball::new(
-            Circle::new(x_center - 50., y_center - 40., 10.),
-            Vec2::new(1., 1.),
-        ),
-        Ball::new(
-            Circle::new(x_center + 50., y_center + 40., 10.),
-            Vec2::new(-12., -5.),
-        ),
-        Ball::new(
-            Circle::new(x_center + 120., y_center + 40., 10.),
-            Vec2::new(0., 0.),
-        ),
-    ];
+    let mut balls: Vec<_> = (0..10)
+        .map(|_| {
+            let cir_x = rand::gen_range(-hex_radius, hex_radius) + x_center;
+            let cir_y = rand::gen_range(-hex_radius, hex_radius) + y_center;
+            let vel_x = rand::gen_range(-10., 10.);
+            let vel_y = rand::gen_range(-10., 10.);
 
-    let mut hexagon =
-        RegularHexagon::new(Vec2::new(screen_width() / 2., screen_height() / 2.), 100.);
+            Ball::new(Circle::new(cir_x, cir_y, 10.), Vec2::new(vel_x, vel_y))
+        })
+        .collect();
+
+    let mut hexagon = RegularHexagon::new(Vec2::new(x_center, y_center), hex_radius);
 
     loop {
         ball_movement(&mut balls);
@@ -171,7 +159,7 @@ fn hex_collisions(balls: &mut [Ball], hex: &RegularHexagon) {
                 .move_to(hex.center.move_towards(ball.cir.point(), hex.radius));
 
             // Refract its velocity
-            ball.vel *= -1.;
+            ball.vel *= -0.9;
 
             // Apply friction?
         }
