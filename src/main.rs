@@ -1,7 +1,8 @@
 use macroquad::prelude::*;
 use std::f32::consts::PI;
 
-const GRAVITY: f32 = 1.1;
+const GRAVITY: f32 = 0.0;
+// const GRAVITY: f32 = 1.1;
 const ROTATION: f32 = PI / 200.;
 
 #[macroquad::main("BallBounce")]
@@ -10,7 +11,7 @@ async fn main() {
     let y_center = screen_height() / 2.;
     let hex_radius = 100.;
 
-    let mut balls: Vec<_> = (0..10)
+    let mut balls: Vec<_> = (0..0)
         .map(|_| {
             let cir_x = rand::gen_range(-hex_radius, hex_radius) + x_center;
             let cir_y = rand::gen_range(-hex_radius, hex_radius) + y_center;
@@ -20,6 +21,11 @@ async fn main() {
             Ball::new(Circle::new(cir_x, cir_y, 10.), Vec2::new(vel_x, vel_y))
         })
         .collect();
+
+    balls.push(Ball::new(
+        Circle::new(x_center - 100., y_center + 100., 10.),
+        Vec2::new(0., 0.),
+    ));
 
     let mut hexagon = RegularHexagon::new(Vec2::new(x_center, y_center), hex_radius);
 
@@ -33,14 +39,6 @@ async fn main() {
         apply_gravity(&mut balls);
 
         draw(&balls, &hexagon).await;
-
-        // println!("{} {}", balls[3].cir.point(), balls[3].vel);
-
-        // fix overlaps
-        // for each each ball
-        //      for each other ball
-        //          if they overlap
-        //          move them away from each other's center the required distance by the ratio of their velocity
     }
 }
 
@@ -60,7 +58,7 @@ impl Ball {
 struct RegularHexagon {
     center: Vec2,
     vertices: [Vec2; 6],
-    radius: f32,
+    // radius: f32,
 }
 
 impl RegularHexagon {
@@ -78,7 +76,7 @@ impl RegularHexagon {
         Self {
             center,
             vertices,
-            radius,
+            // radius,
         }
     }
 
@@ -86,15 +84,14 @@ impl RegularHexagon {
         let angle = Vec2::from_angle(radians);
 
         for i in 0..self.vertices.len() {
-            self.vertices[i] = angle.rotate(self.vertices[i] - self.center) + self.center;
+            // self.vertices[i] = angle.rotate(self.vertices[i] - self.center) + self.center;
         }
     }
 
     fn lines(&self) -> [(Vec2, Vec2); 6] {
         let mut lines: [(Vec2, Vec2); 6] = Default::default();
 
-        for i in 0..self.vertices.len() {
-            let v1 = self.vertices[i];
+        for (i, v1) in self.vertices.into_iter().enumerate() {
             let v2 = if i == 5 {
                 self.vertices[0]
             } else {
@@ -121,30 +118,45 @@ fn ball_collisions(balls: &mut [Ball]) {
     for i in 0..balls.len() {
         for j in (i + 1)..balls.len() {
             if balls[i].cir.overlaps(&balls[j].cir) {
-                let vec_between_circles = balls[j].cir.point() - balls[i].cir.point();
-                let overlap_ratio =
-                    1. - vec_between_circles.length() / (balls[i].cir.r + balls[j].cir.r);
-                let offset = if overlap_ratio == 1.0 {
-                    Vec2::ONE
-                } else {
-                    vec_between_circles * overlap_ratio
-                };
+                let collision_vec = balls[j].cir.point() - balls[i].cir.point();
+                let angle = collision_vec.normalize_or(Vec2::X);
+
+                // Add in some extra to account for rounding errors
+                let overlap_length =
+                    balls[i].cir.r + balls[j].cir.r - collision_vec.length() + 1.0e-3;
 
                 // Shift them away from each other
-                balls[i].cir = balls[i].cir.offset(offset * -0.5);
-                balls[j].cir = balls[j].cir.offset(offset * 0.5);
+                balls[i].cir = balls[i].cir.offset(-angle * overlap_length * 0.5);
+                balls[j].cir = balls[j].cir.offset(angle * overlap_length * 0.5);
+                assert!(
+                    !balls[i].cir.overlaps(&balls[j].cir),
+                    "Balls still overlap:\n{:?}\n{:?}\nDistance: {}",
+                    balls[i],
+                    balls[j],
+                    balls[i].cir.point().distance(balls[j].cir.point())
+                );
 
-                // Update velocities
-                let jmod = (balls[j].cir.point() - balls[i].cir.point()).normalize()
-                    * 0.5
-                    * balls[i].vel.length();
+                // Update velocities due to collision
+                let b1_old_vel = balls[i].vel;
+                let b2_old_vel = balls[j].vel;
 
-                let imod = (balls[i].cir.point() - balls[j].cir.point()).normalize()
-                    * 0.5
-                    * balls[j].vel.length();
+                // Elastic collision with the same mass means all we need is to swap
+                // the component of their velocities that is parallel to the collision
+                let b1_new_vel = b2_old_vel.project_onto_normalized(angle)
+                    + b1_old_vel.reject_from_normalized(angle);
+                let b2_new_vel = b1_old_vel.project_onto_normalized(angle)
+                    + b2_old_vel.reject_from_normalized(angle);
 
-                balls[i].vel = (balls[i].vel - jmod) * 0.5 + imod;
-                balls[j].vel = (balls[j].vel - imod) * 0.5 + jmod;
+                // total energy of old should equal total energy of new
+                let old_energy = b1_old_vel.length_squared() + b2_old_vel.length_squared();
+                let new_energy = b1_new_vel.length_squared() + b2_new_vel.length_squared();
+                assert!(
+                    (old_energy - new_energy).abs() <= 1.0e-3,
+                    "Energy not conserved: {old_energy} {new_energy}"
+                );
+
+                balls[i].vel = b1_new_vel;
+                balls[j].vel = b2_new_vel;
             }
         }
     }
@@ -152,17 +164,27 @@ fn ball_collisions(balls: &mut [Ball]) {
 
 fn hex_collisions(balls: &mut [Ball], hex: &RegularHexagon) {
     for ball in balls {
-        let dist_from_center = (ball.cir.point() - hex.center).length();
-        if hex.radius <= dist_from_center {
-            // Shift it towards center of hex
-            ball.cir
-                .move_to(hex.center.move_towards(ball.cir.point(), hex.radius));
+        let ball_center = ball.cir.point();
+        let (start, end) = hex.lines().iter().fold(
+            (Vec2::INFINITY, Vec2::INFINITY),
+            |(min_start, min_end), (start, end)| {
+                let cur =
+                    min_start.distance_squared(ball_center) + min_end.distance_squared(ball_center);
+                let new = start.distance_squared(ball_center) + end.distance_squared(ball_center);
+                if new < cur {
+                    (*start, *end)
+                } else {
+                    (min_start, min_end)
+                }
+            },
+        );
 
-            // Refract its velocity
-            ball.vel *= -0.9;
+        let midpoint = start.midpoint(end);
+        let midpoint_vec = midpoint - hex.center;
+        let ball_vec = ball.cir.point() - hex.center;
+        let ball_proj = ball_vec.project_onto(midpoint_vec);
 
-            // Apply friction?
-        }
+        if midpoint_vec.length_squared() < ball_proj.length_squared() {}
     }
 }
 
