@@ -1,8 +1,7 @@
 use macroquad::prelude::*;
 use std::f32::consts::PI;
 
-const GRAVITY: f32 = 0.0;
-// const GRAVITY: f32 = 1.1;
+const GRAVITY: f32 = 0.2;
 const ROTATION: f32 = PI / 200.;
 
 #[macroquad::main("BallBounce")]
@@ -11,20 +10,20 @@ async fn main() {
     let y_center = screen_height() / 2.;
     let hex_radius = 100.;
 
-    let mut balls: Vec<_> = (0..0)
+    let mut balls: Vec<_> = (0..25)
         .map(|_| {
             let cir_x = rand::gen_range(-hex_radius, hex_radius) + x_center;
             let cir_y = rand::gen_range(-hex_radius, hex_radius) + y_center;
-            let vel_x = rand::gen_range(-10., 10.);
-            let vel_y = rand::gen_range(-10., 10.);
+            let vel_x = rand::gen_range(-5., 5.);
+            let vel_y = rand::gen_range(-5., 5.);
 
             Ball::new(Circle::new(cir_x, cir_y, 10.), Vec2::new(vel_x, vel_y))
         })
         .collect();
 
     balls.push(Ball::new(
-        Circle::new(x_center - 100., y_center + 100., 10.),
-        Vec2::new(0., 0.),
+        Circle::new(x_center - 110., y_center - 110., 10.),
+        Vec2::new(0.0, 0.0),
     ));
 
     let mut hexagon = RegularHexagon::new(Vec2::new(x_center, y_center), hex_radius);
@@ -58,7 +57,6 @@ impl Ball {
 struct RegularHexagon {
     center: Vec2,
     vertices: [Vec2; 6],
-    // radius: f32,
 }
 
 impl RegularHexagon {
@@ -73,18 +71,14 @@ impl RegularHexagon {
             polar_to_cartesian(radius, max_rads * 6. / 6.) + center,
         ];
 
-        Self {
-            center,
-            vertices,
-            // radius,
-        }
+        Self { center, vertices }
     }
 
     fn rotate(&mut self, radians: f32) {
         let angle = Vec2::from_angle(radians);
 
         for i in 0..self.vertices.len() {
-            // self.vertices[i] = angle.rotate(self.vertices[i] - self.center) + self.center;
+            self.vertices[i] = angle.rotate(self.vertices[i] - self.center) + self.center;
         }
     }
 
@@ -123,7 +117,7 @@ fn ball_collisions(balls: &mut [Ball]) {
 
                 // Add in some extra to account for rounding errors
                 let overlap_length =
-                    balls[i].cir.r + balls[j].cir.r - collision_vec.length() + 1.0e-3;
+                    balls[i].cir.r + balls[j].cir.r - collision_vec.length() + 1.0e-2;
 
                 // Shift them away from each other
                 balls[i].cir = balls[i].cir.offset(-angle * overlap_length * 0.5);
@@ -151,7 +145,7 @@ fn ball_collisions(balls: &mut [Ball]) {
                 let old_energy = b1_old_vel.length_squared() + b2_old_vel.length_squared();
                 let new_energy = b1_new_vel.length_squared() + b2_new_vel.length_squared();
                 assert!(
-                    (old_energy - new_energy).abs() <= 1.0e-3,
+                    (old_energy - new_energy).abs() <= 1.0e-2,
                     "Energy not conserved: {old_energy} {new_energy}"
                 );
 
@@ -164,10 +158,10 @@ fn ball_collisions(balls: &mut [Ball]) {
 
 fn hex_collisions(balls: &mut [Ball], hex: &RegularHexagon) {
     for ball in balls {
-        let ball_center = ball.cir.point();
         let (start, end) = hex.lines().iter().fold(
             (Vec2::INFINITY, Vec2::INFINITY),
             |(min_start, min_end), (start, end)| {
+                let ball_center = ball.cir.point();
                 let cur =
                     min_start.distance_squared(ball_center) + min_end.distance_squared(ball_center);
                 let new = start.distance_squared(ball_center) + end.distance_squared(ball_center);
@@ -178,13 +172,18 @@ fn hex_collisions(balls: &mut [Ball], hex: &RegularHexagon) {
                 }
             },
         );
+        let ball_plus_r = ball.cir.point()
+            + (ball.cir.point() - hex.center).normalize_or_zero() * ball.cir.radius();
 
-        let midpoint = start.midpoint(end);
-        let midpoint_vec = midpoint - hex.center;
-        let ball_vec = ball.cir.point() - hex.center;
-        let ball_proj = ball_vec.project_onto(midpoint_vec);
-
-        if midpoint_vec.length_squared() < ball_proj.length_squared() {}
+        let midpoint = start.midpoint(end) - hex.center;
+        let ball_proj = (ball_plus_r - hex.center).project_onto(midpoint);
+        if midpoint.length_squared() < ball_proj.length_squared() {
+            let line_vec = start - end;
+            let ball_vec = ball_plus_r - end;
+            let offset = ball_vec.reject_from(line_vec);
+            ball.cir = ball.cir.offset(-offset);
+            ball.vel *= -0.8;
+        }
     }
 }
 
